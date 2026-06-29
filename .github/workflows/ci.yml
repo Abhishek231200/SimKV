@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }}, ${{ matrix.build_type }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+        include:
+          - os: ubuntu-latest
+            cc: clang-15
+            cxx: clang++-15
+          - os: macos-latest
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang-15
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -B build \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+      # The determinism guard is so important it gets its own step.
+      - name: Determinism guard
+        run: |
+          cd build
+          ./tests/sim_determinism_test --gtest_filter="Determinism.*"
+
+      # Run a slice of the randomized sim suite to check linearizability.
+      - name: Linearizability smoke test
+        run: |
+          cd build
+          ./tests/linearizability_test --gtest_filter="Linearizability.*"
+
+  # Nightly job runs a larger sim slice (longer, so not on every push).
+  # Uncomment and set schedule for production use:
+  # nightly-sim:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Configure & build
+  #       run: cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+  #     - name: Extended linearizability suite
+  #       run: cd build && ./tests/linearizability_test  # runs all seeds
