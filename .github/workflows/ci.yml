@@ -16,8 +16,8 @@ jobs:
         build_type: [Debug, Release]
         include:
           - os: ubuntu-latest
-            cc: clang-15
-            cxx: clang++-15
+            cc: gcc-13
+            cxx: g++-13
           - os: macos-latest
             cc: clang
             cxx: clang++
@@ -29,7 +29,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-15
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
