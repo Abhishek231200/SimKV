@@ -1,0 +1,16 @@
+include(GoogleTest)
+
+function(add_simkv_test name)
+    add_executable(${name} ${name}.cpp)
+    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(${name} PRIVATE simkv_checker GTest::gtest_main)
+    gtest_discover_tests(${name})
+endfunction()
+
+add_simkv_test(sim_determinism_test)
+add_simkv_test(sim_network_test)
+add_simkv_test(storage_wal_test)
+add_simkv_test(raft_election_test)
+add_simkv_test(raft_replication_test)
+add_simkv_test(raft_partition_test)
+add_simkv_test(linearizability_test)

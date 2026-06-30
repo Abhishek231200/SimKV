@@ -1,0 +1,6 @@
+add_subdirectory(sim)
+add_subdirectory(storage)
+add_subdirectory(raft)
+add_subdirectory(harness)
+add_subdirectory(checker)
+add_subdirectory(cli)

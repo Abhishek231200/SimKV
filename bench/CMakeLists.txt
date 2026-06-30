@@ -1,0 +1,7 @@
+add_executable(bench_throughput bench_throughput.cpp)
+target_include_directories(bench_throughput PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(bench_throughput PRIVATE simkv_checker simkv_compile_flags)
+
+add_executable(bench_recovery bench_recovery.cpp)
+target_include_directories(bench_recovery PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(bench_recovery PRIVATE simkv_raft simkv_compile_flags)
