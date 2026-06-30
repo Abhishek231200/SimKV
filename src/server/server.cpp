@@ -116,19 +116,19 @@ static Args parse_args(int argc, char* argv[]) {
 // "-REDIRECT host:port" so the client can reconnect without probing all nodes.
 static std::string not_leader_response(
     const RaftNode* node,
-    const std::map<NodeId, PeerAddr>& client_peers)
+    const std::map<NodeId, PeerAddr>* client_peers)
 {
     auto lid = node->leader_id();
     if (lid.has_value()) {
-        auto it = client_peers.find(*lid);
-        if (it != client_peers.end())
+        auto it = client_peers->find(*lid);
+        if (it != client_peers->end())
             return "-REDIRECT " + it->second.host + ":" + std::to_string(it->second.port) + "\n";
     }
     return "-ERR not_leader\n";
 }
 
 static void handle_client(int cfd, RaftNode* node, DispatchQueue* dq,
-                           const std::map<NodeId, PeerAddr>& client_peers) {
+                           const std::map<NodeId, PeerAddr>* client_peers) {
     FILE* f = ::fdopen(cfd, "r+");
     if (!f) { ::close(cfd); return; }
 
@@ -151,7 +151,7 @@ static void handle_client(int cfd, RaftNode* node, DispatchQueue* dq,
             else {
                 auto p   = std::make_shared<std::promise<std::string>>();
                 auto fut = p->get_future();
-                dq->post([node, key, val, p, &client_peers]() {
+                dq->post([node, key, val, p, client_peers]() {
                     bool ok = node->submit(0, 0, CmdPut{key, val},
                         [p](CmdResult r) {
                             p->set_value(r.ok ? "+OK\n" : "-ERR " + r.error + "\n");
@@ -166,7 +166,7 @@ static void handle_client(int cfd, RaftNode* node, DispatchQueue* dq,
             else {
                 auto p   = std::make_shared<std::promise<std::string>>();
                 auto fut = p->get_future();
-                dq->post([node, key, p, &client_peers]() {
+                dq->post([node, key, p, client_peers]() {
                     bool ok = node->submit(0, 0, CmdDelete{key},
                         [p](CmdResult r) {
                             p->set_value(r.ok ? "+OK\n" : "-ERR " + r.error + "\n");
@@ -181,9 +181,9 @@ static void handle_client(int cfd, RaftNode* node, DispatchQueue* dq,
             else {
                 auto p   = std::make_shared<std::promise<std::string>>();
                 auto fut = p->get_future();
-                dq->post([node, key, p, &client_peers]() {
+                dq->post([node, key, p, client_peers]() {
                     bool ok = node->read_index(key,
-                        [p, node, &client_peers](bool success, std::optional<std::string> val) {
+                        [p, node, client_peers](bool success, std::optional<std::string> val) {
                             if (!success) { p->set_value(not_leader_response(node, client_peers)); return; }
                             if (val) p->set_value("+" + *val + "\n");
                             else     p->set_value("-NOT_FOUND\n");
@@ -228,7 +228,7 @@ static void client_listener(uint16_t port, RaftNode* node, DispatchQueue* dq,
         if (cfd < 0) continue;
         // Each connection is self-contained: detach so it cleans up independently.
         std::thread([cfd, node, dq, client_peers] {
-            handle_client(cfd, node, dq, *client_peers);
+            handle_client(cfd, node, dq, client_peers);
         }).detach();
     }
 
