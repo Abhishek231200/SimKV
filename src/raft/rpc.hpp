@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 // RPC message type tag (first byte of every network payload).
