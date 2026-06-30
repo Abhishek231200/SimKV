@@ -117,41 +117,58 @@ bool check_key_linearizable(const std::vector<KeyOp>& ops) {
 
     if (certain.empty() && uncertain_puts.empty()) return true;
 
-    // Enumerate all 2^N subsets of uncertain Puts to try including.
-    // N is typically 0-3 under moderate fault injection; capped at 20 for safety.
-    int n_unc = std::min(static_cast<int>(uncertain_puts.size()), 20);
+    // Enumerate 2^N subsets of uncertain Puts (include = committed, exclude = lost).
+    //
+    // Complexity: O(2^N * N!) in the worst case, but bounded in practice because:
+    // (a) N ≤ num_crashes × clients_per_key in any one simulation run — typically 0-4.
+    // (b) Wing-Gong prunes branches early when a Get response is inconsistent.
+    //
+    // Hard cap: if a workload somehow produces > 15 uncertain Puts for a single key,
+    // we fall back to checking only the "all-excluded" and "all-included" extremes.
+    // This is sound for safety (won't produce false positives) but could miss some
+    // valid linearizations — in practice the cap is never reached.
+    const int n_unc     = static_cast<int>(uncertain_puts.size());
+    const int cap       = 15;
+    const bool use_full = (n_unc <= cap);
 
-    for (int mask = 0; mask < (1 << n_unc); ++mask) {
-        // Build combined set: certain ops + included uncertain Puts (with ok=true).
-        std::vector<KeyOp> combined = certain;
-        for (int i = 0; i < n_unc; ++i) {
-            if (mask & (1 << i)) {
-                KeyOp opt = uncertain_puts[i];
-                opt.ok = true; // assume committed and succeeded
-                combined.push_back(opt);
-            }
-        }
-
-        if (combined.empty()) { return true; }
-
-        if (combined.size() > 30) {
-            // Fallback for large histories: sequential consistency (sort by ret time).
-            std::vector<KeyOp> sorted = combined;
-            std::sort(sorted.begin(), sorted.end(),
-                      [](const KeyOp& a, const KeyOp& b) { return a.ret < b.ret; });
-            KvState state;
-            bool ok = true;
-            for (const auto& op : sorted) {
-                auto [ns, expected] = apply_model(state, op);
-                if (!response_matches(op, expected)) { ok = false; break; }
-                state = ns;
-            }
-            if (ok) return true;
-            continue;
-        }
-
+    auto try_subset = [&](std::vector<KeyOp> combined) -> bool {
+        if (combined.empty()) return true;
         std::vector<bool> linearized(combined.size(), false);
-        if (wg_check(combined, linearized, 0, std::nullopt)) return true;
+        return wg_check(combined, linearized, 0, std::nullopt);
+    };
+
+    if (use_full) {
+        // Full 2^N enumeration.
+        for (int mask = 0; mask < (1 << n_unc); ++mask) {
+            std::vector<KeyOp> combined = certain;
+            for (int i = 0; i < n_unc; ++i) {
+                if (mask & (1 << i)) {
+                    KeyOp opt = uncertain_puts[i];
+                    opt.ok = true;
+                    combined.push_back(opt);
+                }
+            }
+            if (try_subset(combined)) return true;
+        }
+    } else {
+        // Fallback: check all-excluded, all-included, and first `cap` individual inclusions.
+        if (try_subset(certain)) return true;
+        {
+            std::vector<KeyOp> all = certain;
+            for (int i = 0; i < n_unc; ++i) {
+                KeyOp opt = uncertain_puts[i];
+                opt.ok = true;
+                all.push_back(opt);
+            }
+            if (try_subset(all)) return true;
+        }
+        for (int i = 0; i < std::min(n_unc, cap); ++i) {
+            std::vector<KeyOp> combined = certain;
+            KeyOp opt = uncertain_puts[i];
+            opt.ok = true;
+            combined.push_back(opt);
+            if (try_subset(combined)) return true;
+        }
     }
 
     return false;

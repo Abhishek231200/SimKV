@@ -14,7 +14,15 @@ struct CmdCas    { std::string key; std::string expected; std::string value; };
 // Get is routed through Raft log for linearizability. KvStore::apply returns the value.
 struct CmdGet    { std::string key; };
 
-using Command = std::variant<CmdPut, CmdDelete, CmdCas, CmdGet>;
+// Membership changes (Raft §6 single-server variant).
+// These are routed through the log so membership updates are durable and ordered.
+// NodeId is uint32_t (defined in sim/network.hpp); using uint32_t here avoids
+// a reverse dependency from raft/ onto sim/.
+struct CmdAddServer    { uint32_t id; };
+struct CmdRemoveServer { uint32_t id; };
+
+using Command = std::variant<CmdPut, CmdDelete, CmdCas, CmdGet,
+                             CmdAddServer, CmdRemoveServer>;
 
 // Result of applying a command to the KvStore.
 struct CmdResult {

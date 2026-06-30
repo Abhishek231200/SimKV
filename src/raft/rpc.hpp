@@ -9,12 +9,16 @@
 
 // RPC message type tag (first byte of every network payload).
 enum class MsgType : uint8_t {
-    RequestVote       = 1,
-    RequestVoteReply  = 2,
-    AppendEntries     = 3,
+    RequestVote        = 1,
+    RequestVoteReply   = 2,
+    AppendEntries      = 3,
     AppendEntriesReply = 4,
-    ClientRequest     = 5,
-    ClientReply       = 6,
+    ClientRequest      = 5,
+    ClientReply        = 6,
+    InstallSnapshot      = 7,
+    InstallSnapshotReply = 8,
+    ReadIndexRequest     = 9,
+    ReadIndexReply       = 10,
 };
 
 // ───────────────────────── RequestVote ──────────────────────────────────────
@@ -78,6 +82,50 @@ struct ClientReply {
 
     std::vector<uint8_t> encode() const;
     static ClientReply decode(const uint8_t* data, std::size_t size);
+};
+
+// ───────────────────────── InstallSnapshot ──────────────────────────────────
+// Sent by the leader to a follower whose next_index has fallen behind the
+// leader's snapshot point. The follower replaces its state machine with the
+// snapshot and discards any log entries it had before last_included_index.
+struct InstallSnapshot {
+    Term                 term;
+    NodeId               leader_id;
+    Index                last_included_index;
+    Term                 last_included_term;
+    std::vector<uint8_t> data; // serialized KV state (Encoder-format)
+
+    std::vector<uint8_t> encode() const;
+    static InstallSnapshot decode(const uint8_t* data, std::size_t size);
+};
+
+struct InstallSnapshotReply {
+    Term  term;
+    Index last_included_index; // echoed back so leader can advance matchIndex
+
+    std::vector<uint8_t> encode() const;
+    static InstallSnapshotReply decode(const uint8_t* data, std::size_t size);
+};
+
+// ───────────────────────── ReadIndex ────────────────────────────────────────
+// Leader broadcasts ReadIndexRequest to all peers to confirm it is still leader
+// before serving a linearizable read. Peers reply with ReadIndexReply; once
+// a majority (including self) have replied with matching round, the read is safe.
+struct ReadIndexRequest {
+    Term     term;
+    NodeId   leader_id;
+    uint64_t round; // per-leader monotone counter; reply echoes it back
+
+    std::vector<uint8_t> encode() const;
+    static ReadIndexRequest decode(const uint8_t* data, std::size_t size);
+};
+
+struct ReadIndexReply {
+    Term     term;
+    uint64_t round;
+
+    std::vector<uint8_t> encode() const;
+    static ReadIndexReply decode(const uint8_t* data, std::size_t size);
 };
 
 // Decode the MsgType tag from the first byte of a payload.

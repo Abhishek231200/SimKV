@@ -29,5 +29,9 @@ CmdResult KvStore::apply(const Command& cmd) {
         std::string val = (it != data_.end()) ? it->second : "";
         return CmdResult{true, val, ""}; // state unchanged
     }
+    if (std::get_if<CmdAddServer>(&cmd) || std::get_if<CmdRemoveServer>(&cmd)) {
+        // Membership changes have no KV-state effect; handled by RaftNode on commit.
+        return CmdResult{true, "", ""};
+    }
     return CmdResult{false, "", "unknown_command"};
 }

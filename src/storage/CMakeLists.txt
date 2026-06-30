@@ -1,5 +1,6 @@
 add_library(simkv_storage
     durable_store.cpp
+    file_durable_store.cpp
     wal.cpp
     kv_store.cpp
 )

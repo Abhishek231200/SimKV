@@ -148,6 +148,87 @@ ClientRequest ClientRequest::decode(const uint8_t* data, std::size_t size) {
     return cr;
 }
 
+// ───────────────────────── InstallSnapshot ──────────────────────────────────
+std::vector<uint8_t> InstallSnapshot::encode() const {
+    Encoder enc;
+    enc.u8(static_cast<uint8_t>(MsgType::InstallSnapshot));
+    enc.u64(term);
+    enc.u32(leader_id);
+    enc.u64(last_included_index);
+    enc.u64(last_included_term);
+    enc.u32(static_cast<uint32_t>(data.size()));
+    for (uint8_t b : data) enc.u8(b);
+    return enc.take();
+}
+
+InstallSnapshot InstallSnapshot::decode(const uint8_t* raw, std::size_t size) {
+    Decoder dec(raw, size);
+    dec.u8(); // skip tag
+    InstallSnapshot is;
+    is.term                = dec.u64();
+    is.leader_id           = dec.u32();
+    is.last_included_index = dec.u64();
+    is.last_included_term  = dec.u64();
+    uint32_t len           = dec.u32();
+    is.data.resize(len);
+    for (uint32_t i = 0; i < len; ++i) is.data[i] = dec.u8();
+    return is;
+}
+
+std::vector<uint8_t> InstallSnapshotReply::encode() const {
+    Encoder enc;
+    enc.u8(static_cast<uint8_t>(MsgType::InstallSnapshotReply));
+    enc.u64(term);
+    enc.u64(last_included_index);
+    return enc.take();
+}
+
+InstallSnapshotReply InstallSnapshotReply::decode(const uint8_t* raw, std::size_t size) {
+    Decoder dec(raw, size);
+    dec.u8();
+    InstallSnapshotReply r;
+    r.term                = dec.u64();
+    r.last_included_index = dec.u64();
+    return r;
+}
+
+// ───────────────────────── ReadIndex ────────────────────────────────────────
+std::vector<uint8_t> ReadIndexRequest::encode() const {
+    Encoder enc;
+    enc.u8(static_cast<uint8_t>(MsgType::ReadIndexRequest));
+    enc.u64(term);
+    enc.u32(leader_id);
+    enc.u64(round);
+    return enc.take();
+}
+
+ReadIndexRequest ReadIndexRequest::decode(const uint8_t* data, std::size_t size) {
+    Decoder dec(data, size);
+    dec.u8();
+    ReadIndexRequest r;
+    r.term      = dec.u64();
+    r.leader_id = dec.u32();
+    r.round     = dec.u64();
+    return r;
+}
+
+std::vector<uint8_t> ReadIndexReply::encode() const {
+    Encoder enc;
+    enc.u8(static_cast<uint8_t>(MsgType::ReadIndexReply));
+    enc.u64(term);
+    enc.u64(round);
+    return enc.take();
+}
+
+ReadIndexReply ReadIndexReply::decode(const uint8_t* data, std::size_t size) {
+    Decoder dec(data, size);
+    dec.u8();
+    ReadIndexReply r;
+    r.term  = dec.u64();
+    r.round = dec.u64();
+    return r;
+}
+
 // ───────────────────────── ClientReply ──────────────────────────────────────
 std::vector<uint8_t> ClientReply::encode() const {
     Encoder enc;

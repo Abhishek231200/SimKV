@@ -15,7 +15,8 @@ static uint32_t crc32c(const uint8_t* data, std::size_t len) {
     return crc ^ 0xFFFFFFFF;
 }
 
-enum class CmdTag : uint8_t { Put = 1, Delete = 2, Cas = 3, Get = 4 };
+enum class CmdTag : uint8_t { Put = 1, Delete = 2, Cas = 3, Get = 4,
+                              AddServer = 5, RemoveServer = 6 };
 
 std::vector<uint8_t> Wal::encode_command(const Command& cmd) {
     Encoder enc;
@@ -34,6 +35,12 @@ std::vector<uint8_t> Wal::encode_command(const Command& cmd) {
     } else if (auto* g = std::get_if<CmdGet>(&cmd)) {
         enc.u8(static_cast<uint8_t>(CmdTag::Get));
         enc.str(g->key);
+    } else if (auto* a = std::get_if<CmdAddServer>(&cmd)) {
+        enc.u8(static_cast<uint8_t>(CmdTag::AddServer));
+        enc.u32(a->id);
+    } else if (auto* r = std::get_if<CmdRemoveServer>(&cmd)) {
+        enc.u8(static_cast<uint8_t>(CmdTag::RemoveServer));
+        enc.u32(r->id);
     }
     return enc.take();
 }
@@ -60,6 +67,14 @@ Command Wal::decode_command(const uint8_t* data, std::size_t size) {
     case CmdTag::Get: {
         auto key = dec.str();
         return CmdGet{std::move(key)};
+    }
+    case CmdTag::AddServer: {
+        uint32_t id = dec.u32();
+        return CmdAddServer{id};
+    }
+    case CmdTag::RemoveServer: {
+        uint32_t id = dec.u32();
+        return CmdRemoveServer{id};
     }
     default:
         throw std::runtime_error("WAL: unknown command tag");

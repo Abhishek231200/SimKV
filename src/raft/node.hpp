@@ -5,9 +5,11 @@
 #include "sim/network.hpp"
 #include "sim/simulator.hpp"
 #include "storage/durable_store.hpp"
+#include "storage/idurable_store.hpp"
 #include "storage/kv_store.hpp"
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
@@ -15,47 +17,53 @@
 struct RaftConfig {
     SimTime election_timeout_lo  = 150 * kMsec; // randomized in [lo, 2*lo]
     SimTime heartbeat_interval   = 50  * kMsec;
-    SimTime client_timeout       = 500 * kMsec; // how long a leader holds a pending req
-    std::size_t max_entries_per_ae = 64;         // batch cap for AppendEntries
+    SimTime client_timeout       = 500 * kMsec;
+    std::size_t max_entries_per_ae = 64;
+
+    // Snapshot: take a snapshot every N committed entries (0 = disabled).
+    std::size_t snapshot_threshold = 0;
+
+    // Read-index: how long to wait for majority acks before cancelling (ok=false).
+    SimTime read_timeout = 2000 * kMsec;
 
     // Bug injection flags — for correctness testing only.
-    bool bug_commit_prior_term   = false; // skip current-term check in commit rule
-    bool bug_skip_vote_uptodate  = false; // skip log up-to-date check when granting vote
+    bool bug_commit_prior_term   = false;
+    bool bug_skip_vote_uptodate  = false;
 };
 
-// Callback types exposed to the harness.
-using ClientCallback = std::function<void(CmdResult)>;
+using ClientCallback      = std::function<void(CmdResult)>;
 using StateChangeCallback = std::function<void(NodeId, Role, Term)>;
+// Callback for read_index: ok=true + value on success; ok=false when leadership lost.
+using ReadCallback        = std::function<void(bool ok, std::optional<std::string> value)>;
 
-// A Raft node: a message-driven state machine that communicates only through
-// the simulated Network and schedules timers as simulator events.
-// No threads, no wall-clock, no real I/O — everything is deterministic.
 class RaftNode {
 public:
+    // By default creates in-memory DurableStore instances (simulation-safe).
+    // Pass non-null store pointers to use FileDurableStore for real persistence.
     RaftNode(NodeId id,
              std::vector<NodeId> peers,
              Simulator& sim,
              Network&   net,
-             RaftConfig cfg = {});
+             RaftConfig cfg = {},
+             std::unique_ptr<IDurableStore> meta_store     = nullptr,
+             std::unique_ptr<IDurableStore> log_store      = nullptr,
+             std::unique_ptr<IDurableStore> snapshot_store = nullptr);
 
-    // Called by the harness to start the node (registers network handler, starts timers).
     void start();
-
-    // Simulate a crash: volatile state lost, unflushed disk tail lost, handler removed.
-    // Call restart() after to bring the node back.
     void crash();
     void restart();
 
     bool is_running() const { return running_; }
 
-    // Submit a client command. cb fires exactly once when committed+applied or on error.
-    // Returns false if this node is not the leader; caller should redirect.
     bool submit(uint64_t client_id, uint64_t request_id,
                 Command cmd, ClientCallback cb);
 
-    // Read the applied KV state (used for Get operations).
-    // For linearizable reads, this should only be called by the leader after a
-    // heartbeat confirms leadership — see submit() for the full read path.
+    // Linearizable read via read-index (Raft §6.4).
+    // Returns false immediately if this node is not the leader.
+    // Otherwise, confirms leadership with a majority heartbeat round before
+    // serving the read — cb fires once confirmed or cancelled (ok=false).
+    bool read_index(const std::string& key, ReadCallback cb);
+
     std::optional<std::string> local_get(const std::string& key) const;
 
     NodeId id()           const { return id_; }
@@ -63,9 +71,9 @@ public:
     Term   current_term() const { return current_term_; }
     Index  commit_index() const { return commit_index_; }
     Index  last_applied() const { return last_applied_; }
+    Index  snap_index()   const { return snap_last_index_; }
     std::optional<NodeId> leader_id() const { return leader_id_; }
 
-    // Observe role/term changes (used by the harness for metrics).
     void set_state_change_cb(StateChangeCallback cb) { state_change_cb_ = std::move(cb); }
 
 private:
@@ -76,6 +84,10 @@ private:
     void handle_append_entries(NodeId from, const AppendEntries& ae);
     void handle_append_entries_reply(NodeId from, const AppendEntriesReply& aer);
     void handle_client_request(NodeId from, const ClientRequest& cr);
+    void handle_install_snapshot(NodeId from, const InstallSnapshot& is);
+    void handle_install_snapshot_reply(NodeId from, const InstallSnapshotReply& isr);
+    void handle_read_index_request(NodeId from, const ReadIndexRequest& req);
+    void handle_read_index_reply(NodeId from, const ReadIndexReply& rep);
 
     // ── Timer callbacks ─────────────────────────────────────────────────────
     void on_election_timeout();
@@ -92,6 +104,19 @@ private:
     void maybe_advance_commit_index();
     void apply_committed_entries();
 
+    // ── Snapshotting ────────────────────────────────────────────────────────
+    void take_snapshot();
+    void save_snapshot();
+    void load_snapshot();
+    void send_install_snapshot(NodeId peer);
+
+    // ── Read-index ──────────────────────────────────────────────────────────
+    void drain_pending_reads();
+    void cancel_pending_reads(); // called on step-down / crash
+
+    // ── Membership ──────────────────────────────────────────────────────────
+    void apply_membership_change(const Command& cmd);
+
     // ── Timer scheduling ────────────────────────────────────────────────────
     void schedule_election_timeout();
     void cancel_election_timeout();
@@ -99,8 +124,7 @@ private:
     void cancel_heartbeat();
 
     // ── Persistence ─────────────────────────────────────────────────────────
-    // Must be called before sending any reply that depends on updated state.
-    void persist(); // saves currentTerm, votedFor, log
+    void persist();
 
     // ── Helpers ─────────────────────────────────────────────────────────────
     bool is_log_up_to_date(Index last_idx, Term last_term) const;
@@ -109,36 +133,51 @@ private:
 
     // ── Identity & config ───────────────────────────────────────────────────
     NodeId              id_;
-    std::vector<NodeId> peers_; // sorted, excludes self
+    std::vector<NodeId> peers_;
     Simulator&          sim_;
     Network&            net_;
     RaftConfig          cfg_;
     bool                running_ = false;
 
-    // ── Persistent state (survives crash if flushed) ────────────────────────
+    // ── Persistent state ─────────────────────────────────────────────────────
     Term                     current_term_ = 0;
     std::optional<NodeId>    voted_for_;
     RaftLog                  log_;
-    DurableStore             meta_store_;  // stores currentTerm + votedFor
-    DurableStore             log_store_;   // stores the log entries
+    std::unique_ptr<IDurableStore> meta_store_;
+    std::unique_ptr<IDurableStore> log_store_;
+    std::unique_ptr<IDurableStore> snapshot_store_;
 
-    // ── Volatile state (reset on crash) ─────────────────────────────────────
-    Role                  role_       = Role::Follower;
+    // Snapshot state (also durable via snapshot_store_).
+    Index                snap_last_index_ = 0;
+    Term                 snap_last_term_  = 0;
+    std::vector<uint8_t> snap_data_;       // serialized KV state at snap_last_index_
+
+    // ── Volatile state ───────────────────────────────────────────────────────
+    Role                  role_         = Role::Follower;
     Index                 commit_index_ = 0;
     Index                 last_applied_ = 0;
     std::optional<NodeId> leader_id_;
+    KvStore               kv_;            // incremental state machine (not rebuilt from scratch)
 
-    // Votes received this election (candidate only).
     std::set<NodeId> votes_received_;
 
-    // Leader volatile state.
-    std::map<NodeId, Index> next_index_;   // next log index to send to each peer
-    std::map<NodeId, Index> match_index_;  // highest replicated index per peer
+    std::map<NodeId, Index> next_index_;
+    std::map<NodeId, Index> match_index_;
 
-    // Pending client callbacks keyed by log index.
-    std::map<Index, std::pair<ClientCallback, NodeId /*client*/>> pending_clients_;
+    std::map<Index, std::pair<ClientCallback, NodeId>> pending_clients_;
 
-    // Timer event IDs.
+    // Read-index state (volatile — cleared on step-down and crash).
+    struct PendingRead {
+        uint64_t    round;       // the ReadIndexRequest round this read is waiting for
+        Index       read_index;  // commit_index_ at submission time
+        std::string key;
+        ReadCallback cb;
+        std::size_t acks;        // starts at 1 (self)
+        EventId     timeout_id;  // cancels the read if majority acks don't arrive in time
+    };
+    std::vector<PendingRead> pending_reads_;
+    uint64_t next_read_round_ = 1;
+
     EventId election_timeout_id_ = 0;
     bool    election_scheduled_  = false;
     EventId heartbeat_id_        = 0;
@@ -146,7 +185,9 @@ private:
 
     StateChangeCallback state_change_cb_;
 
-    // Vote counting: votes[term] = count, to ignore stale replies.
-    Term    election_term_ = 0;
-    uint32_t vote_count_  = 0;
+    Term     election_term_ = 0;
+    uint32_t vote_count_    = 0;
+
+    // Membership: at most one config-change entry may be in-flight at a time.
+    bool config_change_pending_ = false;
 };

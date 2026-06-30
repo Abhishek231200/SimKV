@@ -1,6 +1,8 @@
 # SimKV
 
-A deterministic-simulation-tested distributed key-value store in C++20.
+A deterministic-simulation-tested distributed key-value store in Modern C++20.
+
+![SimKV demo](demo/demo.gif)
 
 A single seeded simulator owns time, randomness, and the network, so the entire
 Raft-replicated cluster runs deterministically — any bug found by randomized fault
@@ -32,7 +34,7 @@ ctest --test-dir build --output-on-failure
 # Replay any run from its seed
 ./build/src/cli/simkv run --seed 42 --dump-trace
 
-# Demonstrate that the checker catches a known Raft bug
+# Demonstrate that the checker catches a known Raft bug 
 ./build/src/cli/simkv run --seed 7 --inject-commit-bug --fault-rate 0.2
 ```
 
