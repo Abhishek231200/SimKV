@@ -2,6 +2,7 @@
 #include "sim/network.hpp"
 #include "sim/simulator.hpp"
 #include <gtest/gtest.h>
+#include <memory>
 
 struct Cluster3P {
     Simulator sim;

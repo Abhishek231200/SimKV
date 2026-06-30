@@ -1,6 +1,7 @@
 #include "harness/runner.hpp"
 #include <format>
 #include <iostream>
+#include <memory>
 
 RunResult run_once(RunConfig cfg) {
     RunResult result;

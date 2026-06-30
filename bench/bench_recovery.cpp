@@ -3,6 +3,7 @@
 #include "sim/simulator.hpp"
 #include <format>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <vector>
 

@@ -2,6 +2,7 @@
 #include "sim/network.hpp"
 #include "sim/simulator.hpp"
 #include <gtest/gtest.h>
+#include <memory>
 #include <vector>
 
 // Helper: build a 3-node cluster and run the sim for `duration` ticks.
