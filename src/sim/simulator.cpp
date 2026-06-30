@@ -40,6 +40,10 @@ void Simulator::run_until_idle() {
     }
 }
 
+uint64_t Simulator::random_range(uint64_t lo, uint64_t hi) {
+    return prng_.range(lo, hi);
+}
+
 void Simulator::run_for(SimTime duration) {
     SimTime deadline = clock_ + duration;
     while (!queue_.empty() && queue_.peek_time() <= deadline) {

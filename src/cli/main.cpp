@@ -107,13 +107,16 @@ int main(int argc, char** argv) {
         std::cout << "  PASS: history is linearizable\n";
         return 0;
     } else {
+        std::string bug_flags;
+        if (cfg.inject_commit_bug) bug_flags += " --inject-commit-bug";
+        if (cfg.inject_vote_bug)   bug_flags += " --inject-vote-bug";
         std::cerr << std::format(
             "\n  FAIL: non-linearizable history!\n"
             "  Failing key: {}\n"
             "  Reason: {}\n"
             "\n"
-            "  To reproduce: simkv run --seed {}\n",
-            check.failing_key, check.reason, cfg.seed);
+            "  To reproduce: simkv run --seed {}{}\n",
+            check.failing_key, check.reason, cfg.seed, bug_flags);
         return 1;
     }
 }

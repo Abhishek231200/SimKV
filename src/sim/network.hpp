@@ -8,6 +8,18 @@
 
 using NodeId = uint32_t;
 
+struct Message;
+
+// Abstract transport interface — used by RaftNode so it can run against either
+// the simulated Network or a real TcpTransport.
+class ITransport {
+public:
+    virtual ~ITransport() = default;
+    virtual void send(NodeId from, NodeId to, std::vector<uint8_t> payload) = 0;
+    virtual void set_handler(NodeId id, std::function<void(Message)> handler) = 0;
+    virtual void remove_handler(NodeId id) = 0;
+};
+
 struct NetworkConfig {
     SimTime min_latency  = 1 * kMsec;
     SimTime max_latency  = 20 * kMsec;
@@ -24,15 +36,15 @@ struct Message {
 // Simulated network with configurable fault injection.
 // All randomness drawn from the owning Simulator's PRNG — never independently seeded.
 // Partition state is maintained as a group assignment: messages only flow within a group.
-class Network {
+class Network : public ITransport {
 public:
     Network(Simulator& sim, NetworkConfig cfg);
 
     // Register a delivery callback for a node.
-    void set_handler(NodeId id, std::function<void(Message)> on_deliver);
-    void remove_handler(NodeId id);
+    void set_handler(NodeId id, std::function<void(Message)> on_deliver) override;
+    void remove_handler(NodeId id) override;
 
-    void send(NodeId from, NodeId to, std::vector<uint8_t> payload);
+    void send(NodeId from, NodeId to, std::vector<uint8_t> payload) override;
 
     // Partition: split nodes into groups. Cross-group messages are silently dropped.
     // Node IDs not listed get their own singleton group (isolated).

@@ -9,7 +9,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 RaftNode::RaftNode(NodeId id, std::vector<NodeId> peers,
-                   Simulator& sim, Network& net, RaftConfig cfg,
+                   IClock& sim, ITransport& net, RaftConfig cfg,
                    std::unique_ptr<IDurableStore> meta_store,
                    std::unique_ptr<IDurableStore> log_store,
                    std::unique_ptr<IDurableStore> snapshot_store)
@@ -123,6 +123,7 @@ bool RaftNode::submit(uint64_t client_id, uint64_t request_id,
     next_index_[id_]  = new_index + 1;
     pending_clients_[new_index] = {std::move(cb), static_cast<NodeId>(client_id)};
     replicate_all();
+    maybe_advance_commit_index(); // handles single-node clusters (no peer replies)
     return true;
 }
 
@@ -203,8 +204,10 @@ void RaftNode::on_message(Message msg) {
         default:
             break;
         }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[node %u] on_message EXCEPTION: %s\n", id_, e.what());
     } catch (...) {
-        // Corrupted/unknown message — ignore.
+        std::fprintf(stderr, "[node %u] on_message UNKNOWN EXCEPTION\n", id_);
     }
 }
 
@@ -702,10 +705,15 @@ void RaftNode::apply_membership_change(const Command& cmd) {
 
 void RaftNode::schedule_election_timeout() {
     if (election_scheduled_) return;
-    SimTime delay = sim_.prng().range(cfg_.election_timeout_lo,
+    uint64_t gen = ++election_generation_;
+    SimTime delay = sim_.random_range(cfg_.election_timeout_lo,
                                       2 * cfg_.election_timeout_lo + 1);
     election_scheduled_ = true;
-    election_timeout_id_ = sim_.schedule(delay, [this]() {
+    election_timeout_id_ = sim_.schedule(delay, [this, gen]() {
+        // In real-clock mode the callback may arrive after cancel() was called,
+        // because RealClock posts to the dispatch queue before the cancel can
+        // intercept it.  The generation counter lets us discard stale firings.
+        if (gen != election_generation_) return;
         election_scheduled_ = false;
         if (!running_) return;
         on_election_timeout();
@@ -716,6 +724,7 @@ void RaftNode::cancel_election_timeout() {
     if (election_scheduled_) {
         sim_.cancel(election_timeout_id_);
         election_scheduled_ = false;
+        election_generation_++;
     }
 }
 

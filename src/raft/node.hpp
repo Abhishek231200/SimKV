@@ -2,8 +2,8 @@
 #include "raft/log.hpp"
 #include "raft/rpc.hpp"
 #include "raft/types.hpp"
-#include "sim/network.hpp"
-#include "sim/simulator.hpp"
+#include "sim/network.hpp"   // ITransport, NodeId, Message
+#include "sim/simulator.hpp" // IClock, EventId, SimTime
 #include "storage/durable_store.hpp"
 #include "storage/idurable_store.hpp"
 #include "storage/kv_store.hpp"
@@ -42,8 +42,8 @@ public:
     // Pass non-null store pointers to use FileDurableStore for real persistence.
     RaftNode(NodeId id,
              std::vector<NodeId> peers,
-             Simulator& sim,
-             Network&   net,
+             IClock&    sim,
+             ITransport& net,
              RaftConfig cfg = {},
              std::unique_ptr<IDurableStore> meta_store     = nullptr,
              std::unique_ptr<IDurableStore> log_store      = nullptr,
@@ -134,8 +134,8 @@ private:
     // ── Identity & config ───────────────────────────────────────────────────
     NodeId              id_;
     std::vector<NodeId> peers_;
-    Simulator&          sim_;
-    Network&            net_;
+    IClock&             sim_;
+    ITransport&         net_;
     RaftConfig          cfg_;
     bool                running_ = false;
 
@@ -178,10 +178,11 @@ private:
     std::vector<PendingRead> pending_reads_;
     uint64_t next_read_round_ = 1;
 
-    EventId election_timeout_id_ = 0;
-    bool    election_scheduled_  = false;
-    EventId heartbeat_id_        = 0;
-    bool    heartbeat_scheduled_ = false;
+    EventId  election_timeout_id_ = 0;
+    bool     election_scheduled_  = false;
+    uint64_t election_generation_ = 0; // incremented each schedule; stale callbacks check this
+    EventId  heartbeat_id_        = 0;
+    bool     heartbeat_scheduled_ = false;
 
     StateChangeCallback state_change_cb_;
 

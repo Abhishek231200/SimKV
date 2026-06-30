@@ -7,12 +7,12 @@
 #include <unistd.h>
 
 // fdatasync is in unistd.h but gated behind _POSIX_C_SOURCE on some platforms.
+// Use fsync for performance. F_FULLFSYNC (macOS) flushes the hardware write cache
+// and takes 100ms+, which blocks the dispatch thread long enough for election timers
+// to fire before vote replies are sent. fsync() is sufficient for correctness.
+static int simkv_datasync(int fd) { return ::fsync(fd); }
 #if defined(__APPLE__)
-// macOS: use fcntl(F_FULLFSYNC) for durability stronger than fdatasync.
 #include <sys/fcntl.h>
-static int simkv_datasync(int fd) { return ::fcntl(fd, F_FULLFSYNC); }
-#else
-static int simkv_datasync(int fd) { return ::fdatasync(fd); }
 #endif
 
 FileDurableStore::FileDurableStore(const std::string& path) {
