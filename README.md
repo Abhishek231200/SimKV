@@ -37,8 +37,8 @@ ctest --test-dir build --output-on-failure
 # Replay any run from its seed
 ./build/src/cli/simkv run --seed 42 --dump-trace
 
-# Demonstrate that the checker catches a known Raft bug 
-./build/src/cli/simkv run --seed 7 --inject-commit-bug --fault-rate 0.2
+# Demonstrate that the checker catches a known Raft bug (seed 13 reliably triggers it)
+./build/src/cli/simkv run --seed 13 --inject-commit-bug --fault-rate 0.2
 ```
 
 ## Seed replay demo
@@ -87,8 +87,9 @@ src/
   raft/        Types, RPCs, RaftLog, RaftNode (the state machine)
   harness/     History recorder, Workload generator, FaultInjector, Runner
   checker/     Wing-Gong linearizability checker + Porcupine Go glue
-  cli/         CLI entry point
-tests/         Unit and property tests for each layer
+  cli/         CLI entry point (simulation driver)
+  server/      simkv_server: DispatchQueue, RealClock, TcpTransport
+tests/         Unit and property tests for each layer; integration_test.sh
 bench/         Throughput / latency / recovery benchmarks
 scripts/       replay.sh, run_porcupine.sh
 docs/design.md Full design doc
