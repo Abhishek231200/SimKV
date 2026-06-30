@@ -1,8 +1,8 @@
 // simkv-server — real multi-process Raft node with TCP transport.
 //
 // Usage:
-//   simkv-server --id 1 --raft-port 7001 --client-port 8001 \
-//                --peers 2:127.0.0.1:7002,3:127.0.0.1:7003 \
+//   simkv-server --id 1 --raft-port 7001 --client-port 8001
+//                --peers 2:127.0.0.1:7002,3:127.0.0.1:7003
 //                --data-dir /tmp/node1
 //
 // Client protocol (line-based on --client-port):
